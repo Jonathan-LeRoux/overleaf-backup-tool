@@ -8,172 +8,77 @@ import requests as reqs
 import sys
 from bs4 import BeautifulSoup
 
-from utils.debug import is_debug, enable_http_client_debug
-
-sleep_range_ms = [500, 1000]
-def random_sleep():
-    time.sleep(float(random.randrange(sleep_range_ms[0], sleep_range_ms[
-        1])) / 1000.0)  # reducing the chance of being caught by a simple api server crawler security
-
-OVERLEAF_PROJECTS_STATUS_TYPES = ["active", "starred", "archived", "trash"]
 
 class OverleafClient(object):
-    def __init__(self, ):
 
-        self._url_signin = "https://www.overleaf.com//users/sign_in"
-        self._dashboard_url = "https://www.overleaf.com/dash/"
+    @staticmethod
+    def filter_projects(json_content, more_attrs=None, include_archived=False):
+        more_attrs = more_attrs or {}
+        for p in json_content:
+            # if any([p.get(status) for status in status_list]):
+            if (include_archived or not p.get("archived")) and not p.get("trashed"):
+                if all(p.get(k) == v for k, v in more_attrs.items()):
+                    yield p
 
-        self._login_cookies = None
-        self._login_request_get = None
-        self._login_request_post = None
+    def __init__(self, cookie=None, csrf=None):
 
-    def get_projects(self, status="all"):
-        if not status in OVERLEAF_PROJECTS_STATUS_TYPES+["all"]:
-            raise ValueError("status {0} is not in allowed types list: {1}".format(status, ", ".join(OVERLEAF_PROJECTS_STATUS_TYPES)))
+        self._url_signin = "https://www.overleaf.com/login"
+        self._dashboard_url = "https://www.overleaf.com/project"
 
-        if status == "all":
-            status_list = ["active", "archived"]
-        else:
-            status_list = [status]
+        self._login_cookies = cookie
+        self._csrf = csrf
 
-        login_cookies = self._login_cookies
-        all_projects = []
-        for st in status_list:
-            status_projects = self.get_projects_by_status(st, login_cookies)
-            all_projects.extend(status_projects)
-
-        return all_projects
-
-
-
-    def get_projects_by_status(self, status, login_cookies=None):
+    def all_projects(self, include_archived = False):
         """
-        Gets the projects json by status
-        :param status: Status type: active, archived, trash
-        :param login_cookies: The cookie container. If None, it is retrieved from the current object
-        :return: Projects list
+        Get all of a user's projects with status in a given status list
+        Returns: List of project objects
         """
-
-        if not status in OVERLEAF_PROJECTS_STATUS_TYPES:
-            raise ValueError("status {0} is not in allowed types list: {1}".format(status, ", ".join(OVERLEAF_PROJECTS_STATUS_TYPES)))
-
-        if login_cookies is None:
-            login_cookies = self._login_cookies
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36'}
-
-        # try to load the dashboard page
-        dashboard_url = self._dashboard_url
-        page_projects_req = reqs.get(dashboard_url, headers=headers, cookies=login_cookies)
-        if page_projects_req.status_code != 200:
-            logging.error("Something went wrong! : %s" % str(page_projects_req.status_code))
-
-        # load the projects via the json api
-        projects_list = []
-
-        page = 1
-        while (True):
-            params = {"is": status,
-                      "per": 50,
-                      }
-
-            if page > 1:
-                params["page"] = page
-
-            proj_json_req = reqs.get("https://www.overleaf.com/api/v0/current_user/docs/",
-                                     params,
-                                     headers=headers,
-                                     cookies=login_cookies)
-
-            # parse json
-            proj_json = json.loads(proj_json_req.text)
-            projects_list.extend(proj_json["docs"])
-
-            # check if this is the last page
-            res_curr_page = proj_json["paging"]["current_page"]
-            res_total_pages = proj_json["paging"]["total_pages"]
-            if res_curr_page == res_total_pages:
-                break
-
-            page += 1
-
-            random_sleep()
-
-        return projects_list
+        projects_page = reqs.get(self._dashboard_url, cookies=self._login_cookies)
+        json_content = json.loads(
+            BeautifulSoup(projects_page.content, 'html.parser').find('meta', {'name': 'ol-projects'})["content"])
+        #".find('script', {'id': 'data'}).contents[0])
+        return list(OverleafClient.filter_projects(json_content, include_archived = include_archived))
 
     def login_with_user_and_pass(self, username, password):
         """
-        Try to signin and sets the login cookie if successfull.
-        :param username: Overleaf username (e-mail)
-        :param password: Overleaf password
-        :return:
+        Login to the Overleaf Service with a username and a password
+        Params: username, password
+        Returns: Dict of cookie and CSRF
         """
 
-        is_successfull = False
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36'}
-
-        # get sign_in page html and get authenticity token - this is required to make the login request
-        r_signing_get = reqs.get(self._url_signin, headers=headers)
+        r_signing_get = reqs.get(self._url_signin)
         if r_signing_get.status_code != 200:
             err_msg = "Status code {0} when loading {1}. Can not continue...".format(r_signing_get.status_code, self._url_signin)
 
             raise Exception(err_msg)
 
-        html_doc = r_signing_get.text
-        soup = BeautifulSoup(html_doc, 'html.parser')
-        authenticity_token = ""
-        for tag in soup.find_all("meta"):
-            if tag.get("name", None) == "csrf-token":
-                authenticity_token = tag.get("content", None)
-                break
+        self._csrf = BeautifulSoup(r_signing_get.content, 'html.parser').find(
+            'input', {'name': '_csrf'}).get('value')
+        login_json = {
+            "_csrf": self._csrf,
+            "email": username,
+            "password": password
+        }
+        r_signing_post = reqs.post(self._url_signin, json=login_json,
+                               cookies=r_signing_get.cookies)
 
-        if len(authenticity_token) == 0:
-            err_msg = "authenticity_token is empty! Can not continue..."
-
-            raise Exception(err_msg)
-
-        # form login data object
-        login_json = {"utf8": u"\u2713",
-                      "authenticity_token": authenticity_token,
-                      "user[email]": username,
-                      "user[password]": password,
-                      "user[remember_me]": 0,
-                      }
-
-        r_signing_post = reqs.post(self._url_signin, data=login_json, timeout=5, headers=headers, cookies=r_signing_get.cookies)
-
+        is_successful = False
         login_cookies = None
-        if r_signing_post.status_code == 200:
+        # On a successful authentication the Overleaf API returns a new authenticated cookie.
+        # If the cookie is different than the cookie of the GET request the authentication was successful
+        if r_signing_post.status_code == 200 and r_signing_get.cookies["overleaf_session2"] != r_signing_post.cookies[
+            "overleaf_session2"]:
+            is_successful = True
             login_cookies = r_signing_post.cookies
-            is_successfull = True
+
+            # Enrich cookie with gke-route cookie from GET request above
+            login_cookies['gke-route'] = r_signing_get.cookies['gke-route']
         else:
-            err_msg = "Status code {0} when signing in {1} with user [{2}] and pass [{3}]. Can not continue..".format(r_signing_post.status_code, self._url_signin, username, "*" * len(password))
+            err_msg = "Status code {0} when signing in {1} with user [{2}] and pass [{3}]. " \
+                      "Can not continue..".format(r_signing_post.status_code, self._url_signin, username, "*" * len(password))
             raise Exception(err_msg)
 
-        self._login_request_get = r_signing_get
-        self._login_request_post = r_signing_post
+
         self._login_cookies = login_cookies
-
-        return is_successfull
-
-
-if __name__ == "__main__":
-
-    if is_debug():
-        enable_http_client_debug()  # log http requests
-
-    username = sys.argv[1]
-    password = sys.argv[2]
-
-    overleaf_client = OverleafClient()
-
-    overleaf_client.login_with_user_and_pass(username, password)
-
-    projects = overleaf_client.get_projects_by_status('active')
-    projects_all = overleaf_client.get_projects('all')
-
-
-    logging.info("Projects loaded:%s" % len(projects))
+        return {"cookie": self._login_cookies, "csrf": self._csrf}
 

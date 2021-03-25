@@ -40,3 +40,6 @@ def enable_http_client_debug():
     requests_log = logging.getLogger("requests.packages.urllib3")
     requests_log.setLevel(logging.DEBUG)
     requests_log.propagate = True
+
+    logger = logging.getLogger('chardet.charsetprober')
+    logger.setLevel(logging.INFO)
