@@ -24,22 +24,23 @@ pip install -r requirements.txt
 
 ## Usage
 ```bash
-python overleaf_backup.py --backup_dir my_backup_dir --include-archived
+python overleaf_backup.py --backup-dir my_backup_dir --include-archived
 # The code will try to push to a remote repo if a non-empty string is passed after --remote_path:
-python overleaf_backup.py --backup_dir my_backup_dir --include-archived --remote-api-uri remote_api_uri --remote-path path/to/folder/on/remote/server -auth-token your_auth_token --remote-type rc
+python overleaf_backup.py --backup-dir my_backup_dir --include-archived --remote-api-uri remote_api_uri --remote-path path/to/folder/on/remote/server --auth-token your_auth_token --remote-type rc --remote-name rc --cookie-path .olauth
 ```
 
 ## How it works
 The tool logs in with your Overleaf username and password and downloads 
 all non-archived projects (and optionally archived as well) via git.
 
-The first time, you will be prompted for username and password, but after login 
+The first time, you will be prompted for username and password, but 
+if a cookie path is provided, the cookie will be saved and after login 
 has been successful once, the saved cookie information will be used instead.
 
-You will find the cloned projects folders in backup_dir/git_backup/:
+You will find the cloned projects folders in my_backup_dir/git_backup/:
 
 ```text
-your_backup_dir/
+my_backup_dir/
 └── git_backup
    ├── yourproject1name
    │   ├── acl2018.bib

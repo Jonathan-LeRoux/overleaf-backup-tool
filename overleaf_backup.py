@@ -36,12 +36,14 @@ def limit_folder_name_length(folder_name, max_length=40):
 # @click.option('-p', '--password', hide_input=True, required=False,
 #               prompt="Password (type anything if already logged in, delete cookie and start again if needed)",
 #               help="You Overleaf password. Will NOT be stored or used for anything else.")
-@click.option('--cookie-path', default=".olauth", type=click.Path(exists=False),
+@click.option('-c', '--cookie-path', default="", type=click.Path(exists=False),
               help="Relative path to save/load the persisted Overleaf cookie.")
 @click.option('-b', '--backup-dir', default="./", type=click.Path(exists=True),
               help="Path of folder in which to store git backups.")
 @click.option('--include-archived/--ignore-archived', 'include_archived', default=False,
               help="Download archived projects as well (Default: No).")
+@click.option('--verbose/--non-verbose', 'verbose', default=False,
+              help="Verbose mode (Default: No).")
 @click.option('-u', '--remote-api-uri', default="", type=str,
               help="Path to remote API if pushing git repos to another remote.")
 @click.option('-r', '--remote-path', default="", type=str,
@@ -52,11 +54,13 @@ def limit_folder_name_length(folder_name, max_length=40):
               help="Name (within git) of remote for pushing git repos to another remote.")
 @click.option('-t', '--remote-type', default="rc", type=click.Choice(['rc', 'github'], case_sensitive=False),
               help="Type other remote for pushing git repos (either 'rc' or 'github').")
-def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path, remote_type, remote_name, auth_token):
+def main(cookie_path, backup_dir, include_archived, remote_api_uri,
+         remote_path, remote_type, remote_name, auth_token, verbose):
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
 
-    if is_debug():
+    verbose = is_debug() or verbose
+    if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         enable_http_client_debug()  # log http requests
 
@@ -78,8 +82,10 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
         store = overleaf_client.login_with_user_and_pass(username, password)
         if store is None:
             return False
-        with open(cookie_path, 'wb+') as f:
-            pickle.dump(store, f)
+        if cookie_path:
+            # Only store if a path is provided
+            with open(cookie_path, 'wb+') as f:
+                pickle.dump(store, f)
     else:
         logging.info("Using stored credentials, please delete {} if you would like to login again".format(cookie_path))
         with open(cookie_path, 'rb') as f:
@@ -110,12 +116,20 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
         proj_git_url = proj["url_git"]
         proj_name = proj["name"]
 
-        if pushed_to_remote_key not in proj:
-            proj[pushed_to_remote_key] = False
-
         # Use project name transformed into valid file/folder name as folder name
         sanitized_proj_name = limit_folder_name_length(get_valid_filename(proj_name))
         proj_backup_path = os.path.join(backup_git_dir, sanitized_proj_name)
+
+        # Handle a potential project name change in OVerleaf
+        if proj["id"] in projects_old_id_to_info \
+                and (projects_old_id_to_info[proj["id"]]["name"] != proj_name):
+            old_proj_name = projects_old_id_to_info[proj["id"]]["name"]
+            old_sanitized_proj_name = limit_folder_name_length(get_valid_filename(old_proj_name))
+            old_proj_backup_path = os.path.join(backup_git_dir, old_sanitized_proj_name)
+            if os.path.isdir(old_proj_backup_path):
+                os.rename(old_proj_backup_path, proj_backup_path)
+        else:
+            old_proj_name = None
 
         # check if needs backup
         backup = True
@@ -124,9 +138,14 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
                 and ("backup_up_to_date" in projects_old_id_to_info[proj["id"]]
                      and projects_old_id_to_info[proj["id"]]["backup_up_to_date"]):
             proj["backup_up_to_date"] = True
+            if old_proj_name:
+                proj[pushed_to_remote_key] = False  # we need to force a push to change the repo name
+            else:
+                proj[pushed_to_remote_key] = projects_old_id_to_info[proj["id"]][pushed_to_remote_key]
             backup = False
         else:
             proj["backup_up_to_date"] = False
+            proj[pushed_to_remote_key] = False
 
         if not backup:
             logging.info("{0}/{1} Project {2} with url {3} has not changed since last backup! Skip..."
@@ -142,10 +161,12 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
                 proj[pushed_to_remote_key] = False
             except Exception as ex:
                 logging.exception("Something went wrong during Overleaf pull!")
+
         if remote_path and proj["backup_up_to_date"] and not proj[pushed_to_remote_key]:
             try:
                 storage.push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
-                                       sanitized_proj_name, proj_backup_path)
+                                       sanitized_proj_name, proj_backup_path,
+                                       old_repo_name = old_proj_name, verbose= verbose)
                 logging.info("Push successful!")
                 proj[pushed_to_remote_key] = True
             except Exception as ex:

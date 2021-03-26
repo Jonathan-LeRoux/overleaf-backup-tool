@@ -50,22 +50,34 @@ class GitStorage():
         logging.exception("max retry count reached")
         raise
 
-    def push_to_remote(self, remote_api_uri, remote_path, remote_name, remote_type, auth_token, repo_name, repo_dir):
+    def push_to_remote(self, remote_api_uri, remote_path, remote_name, remote_type, auth_token, repo_name, repo_dir,
+                       old_repo_name = None, verbose = False):
         # Is the remote_base_uri used for API calls the same as the http path used for git push/pull?
         if os.path.isdir(repo_dir):
             for i in range(1, RETRY + 1):
                 try:
                     myrepo = Repo(repo_dir)
-                    if remote_name not in myrepo.remotes:
-                        # create repo (and branch?) on the remote
+                    if remote_name not in myrepo.remotes or old_repo_name is not None:
+                        # We need to either create or rename the repo on the remote
                         repo_created = False
                         if remote_type == 'rc':
-                            rc_args = {
-                                'repo_name': '/'.join([remote_path, repo_name]),
-                                'repo_type': 'git',
-                                'description': 'Backup for Overleaf repo {}'.format(repo_name),
-                            }
-                            result_dict = call_rhodecode(remote_api_uri, auth_token, 'create_repo', rc_args, True)
+                            if remote_name not in myrepo.remotes:
+                                # create repo on the remote
+                                rc_args = {
+                                    'repo_name': '/'.join([remote_path, repo_name]),
+                                    'repo_type': 'git',
+                                    'description': 'Backup for Overleaf repo {}'.format(repo_name),
+                                }
+                                result_dict = call_rhodecode(remote_api_uri, auth_token, 'create_repo', rc_args, verbose)
+                            elif old_repo_name is not None:
+                                # We need to rename the repo because the project name changed on Overleaf
+                                rc_args = {
+                                    'repoid' : '/'.join([remote_path, old_repo_name]),
+                                    'repo_name': '/'.join([remote_path, repo_name]),
+                                    'description': 'Backup for Overleaf repo {}'.format(repo_name),
+                                }
+                                result_dict = call_rhodecode(remote_api_uri, auth_token, 'update_repo', rc_args, verbose)
+
                             # We assume the call is successful either if it did create the repo or gave an error
                             # because a repo with the same name already existed (not super safe??)
                             if result_dict['error'] is None or 'unique_repo_name' in result_dict['error']:
@@ -78,7 +90,11 @@ class GitStorage():
                             repo_created = False
                         # add remote to repo
                         if repo_created:
-                            myrepo.create_remote(remote_name, urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
+                            if remote_name not in myrepo.remotes:
+                                myrepo.create_remote(remote_name,
+                                                     urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
+                            else:
+                                myrepo.set_url(urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
 
                     # push
                     myrepo.remotes[remote_name].push()
