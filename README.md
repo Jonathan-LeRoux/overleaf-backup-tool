@@ -7,7 +7,7 @@ to handle Overleaf v2 and securely input password without having
 to write it on the command line (using Click). 
 - Replaced project ID with a sanitized version of the project name 
 as folder name.
-- Reduced wait time during retry to 5 s
+- Reduced wait time during retry to 2 s
 - Print number of successful backups
 - Optionally push backed up repo to remote on a Rhodecode server, 
 creating it if it doesn't exist; requires creating an API auth_token on Rhodecode
