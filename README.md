@@ -9,7 +9,9 @@ to write it on the command line (using Click).
 as folder name.
 - Reduced wait time during retry to 5 s
 - Print number of successful backups
-
+- Optionally push backed up repo to remote on a Rhodecode server, 
+creating it if it doesn't exist; requires creating an API auth_token on Rhodecode
+ (Note: I may add Github support later)
 
 ## Installation
 Works with Python 3.+
@@ -23,6 +25,8 @@ pip install -r requirements.txt
 ## Usage
 ```bash
 python overleaf_backup.py --backup_dir my_backup_dir --include-archived
+# The code will try to push to a remote repo if a non-empty string is passed after --remote_path:
+python overleaf_backup.py --backup_dir my_backup_dir --include-archived --remote-api-uri remote_api_uri --remote-path path/to/folder/on/remote/server -auth-token your_auth_token --remote-type rc
 ```
 
 ## How it works

@@ -42,7 +42,15 @@ def limit_folder_name_length(folder_name, max_length=30):
               help="Path of folder in which to store git backups.")
 @click.option('--include-archived/--ignore-archived', 'include_archived', default=False,
               help="Download archived projects as well (Default: No).")
-def main(cookie_path, backup_dir, include_archived):
+@click.option('-u', '--remote-api-uri', default="", type=str,
+              help="Path to remote API if pushing git repos to another remote.")
+@click.option('-r', '--remote-path', default="", type=str,
+              help="Path (without base URI) to subfolder for pushing git repos to another remote.")
+@click.option('-a', '--auth-token', default="", type=str,
+              help="Auth token for remote API access for pushing git repos.")
+@click.option('-n', '--remote-type', default="rc", type=click.Choice(['rc', 'github'], case_sensitive=False),
+              help="Type other remote for pushing git repos (either 'rc' or 'github').")
+def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path, remote_type, auth_token):
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
 
@@ -74,9 +82,8 @@ def main(cookie_path, backup_dir, include_archived):
         overleaf_client = OverleafClient(store["cookie"], store["csrf"])
 
     projects_info_list = overleaf_client.all_projects(include_archived=include_archived)
-    # projects_info_list = overleaf_client.get_projects(status="all")
 
-    logging.info("Total projects:%s" % len(projects_info_list))
+    logging.info("Total projects: %s" % len(projects_info_list))
 
     if not os.path.exists(backup_dir):
         os.makedirs(backup_dir)
@@ -98,8 +105,12 @@ def main(cookie_path, backup_dir, include_archived):
         proj_git_url = proj["url_git"]
         proj_name = proj["name"]
 
+        if "pushed_to_own_remote" not in proj:
+            proj["pushed_to_own_remote"] = False
+
         # Use project name transformed into valid file/folder name as folder name
-        proj_backup_path = os.path.join(backup_git_dir, limit_folder_name_length(get_valid_filename(proj_name)))
+        sanitized_proj_name = limit_folder_name_length(get_valid_filename(proj_name))
+        proj_backup_path = os.path.join(backup_git_dir, sanitized_proj_name)
 
         # check if needs backup
         backup = True
@@ -115,20 +126,30 @@ def main(cookie_path, backup_dir, include_archived):
         if not backup:
             logging.info("{0}/{1} Project {2} with url {3} has not changed since last backup! Skip..."
                          .format(i + 1, len(projects_info_list), proj_id, proj_git_url, proj_backup_path))
-            continue
+        else:
+            logging.info("{0}/{1} Backing up project {2} with url {3} to {4}"
+                         .format(i+1, len(projects_info_list), proj_id, proj_git_url, proj_backup_path))
 
-        logging.info("{0}/{1} Backing up project {2} with url {3} to {4}"
-                     .format(i+1, len(projects_info_list), proj_id, proj_git_url, proj_backup_path))
+            try:
+                storage.create_or_update(proj_git_url, proj_backup_path)
+                logging.info("Backup successful!")
+                proj["backup_up_to_date"] = True
+                proj["pushed_to_own_remote"] = False
+            except Exception as ex:
+                logging.exception("Something went wrong during Overleaf pull!")
+        if remote_path and proj["backup_up_to_date"] and not proj["pushed_to_own_remote"]:
+            try:
+                storage.push_to_remote(remote_api_uri, remote_path, remote_type, auth_token,
+                                       sanitized_proj_name, proj_backup_path)
+                logging.info("Push successful!")
+                proj["pushed_to_own_remote"] = True
+            except Exception as ex:
+                logging.exception("Something went wrong during push to other remote!")
 
-        try:
-            storage.create_or_update(proj_git_url, proj_backup_path)
-            logging.info("Backup successful!")
-            proj["backup_up_to_date"] = True
-        except Exception as ex:
-            logging.exception("Something went wrong!")
-
-    logging.info("Successfully backed up {} projects out of {}.".format(
-        len([proj for proj in projects_info_list if proj["backup_up_to_date"]]), len(projects_info_list)))
+    logging.info("Successfully backed up {} projects and pushed {} projects out of {}.".format(
+        len([proj for proj in projects_info_list if proj["backup_up_to_date"]]),
+        len([proj for proj in projects_info_list if proj["pushed_to_own_remote"]]),
+        len(projects_info_list)))
     json.dump(projects_info_list, open(projects_json_file, "w"))
     logging.info("Info for {0} projects saved to {1}!".format(len(projects_info_list), projects_json_file))
 
