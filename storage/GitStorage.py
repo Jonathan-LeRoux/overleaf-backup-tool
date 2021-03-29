@@ -89,7 +89,7 @@ class GitStorage():
                             # because a repo with the same name already existed (not super safe??)
                             if result_dict['error'] is None or 'unique_repo_name' in result_dict['error']:
                                 repo_created = True
-                                if 'msg' in result_dict['result']:
+                                if result_dict['result'] is not None and 'msg' in result_dict['result']:
                                     logging.info("Remote responded: {}".format(result_dict['result']['msg']))
 
                         elif  remote_type == 'github':
