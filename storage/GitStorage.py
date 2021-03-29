@@ -57,11 +57,18 @@ class GitStorage():
             for i in range(1, RETRY + 1):
                 try:
                     myrepo = Repo(repo_dir)
-                    if remote_name not in myrepo.remotes or old_repo_name is not None:
+                    remote_repo_url = urljoin(remote_api_uri, '/'.join([remote_path, repo_name]))
+                    remote_uri_and_path_changed = False
+                    if remote_name in myrepo.remotes:
+                        old_remote_url = myrepo.remotes[remote_name].url
+                        remote_uri_and_path = urljoin(remote_api_uri, remote_path)
+                        if not old_remote_url.startswith(remote_uri_and_path):
+                            remote_uri_and_path_changed = True
+                    if remote_name not in myrepo.remotes or old_repo_name is not None or remote_uri_and_path_changed:
                         # We need to either create or rename the repo on the remote
                         repo_created = False
                         if remote_type == 'rc':
-                            if remote_name not in myrepo.remotes:
+                            if remote_name not in myrepo.remotes or remote_uri_and_path_changed:
                                 # create repo on the remote
                                 rc_args = {
                                     'repo_name': '/'.join([remote_path, repo_name]),
@@ -91,10 +98,9 @@ class GitStorage():
                         # add remote to repo
                         if repo_created:
                             if remote_name not in myrepo.remotes:
-                                myrepo.create_remote(remote_name,
-                                                     urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
+                                myrepo.create_remote(remote_name, remote_repo_url)
                             else:
-                                myrepo.remotes[remote_name].set_url(urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
+                                myrepo.remotes[remote_name].set_url(remote_repo_url)
 
                     # push
                     myrepo.remotes[remote_name].push()

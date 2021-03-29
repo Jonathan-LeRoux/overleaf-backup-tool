@@ -68,6 +68,8 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
               help="Download archived projects as well (Default: No).")
 @click.option('--verbose/--non-verbose', 'verbose', default=False,
               help="Verbose mode (Default: No).")
+@click.option('--force-push/--no-force-push', 'force_push', default=False,
+              help="Force push to remote (Default: No).")
 @click.option('-u', '--remote-api-uri', default="", type=str,
               help="Path to remote API if pushing git repos to another remote.")
 @click.option('-r', '--remote-path', default="", type=str,
@@ -79,7 +81,7 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
 @click.option('-t', '--remote-type', default="rc", type=click.Choice(['rc', 'github'], case_sensitive=False),
               help="Type other remote for pushing git repos (either 'rc' or 'github').")
 def main(cookie_path, backup_dir, include_archived, remote_api_uri,
-         remote_path, remote_type, remote_name, auth_token, verbose):
+         remote_path, remote_type, remote_name, auth_token, verbose, force_push):
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
 
@@ -195,7 +197,7 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             except Exception as ex:
                 logging.exception("Something went wrong during Overleaf pull!")
 
-        if remote_path and proj["backup_up_to_date"] and not proj[pushed_to_remote_key]:
+        if remote_path and proj["backup_up_to_date"] and (not proj[pushed_to_remote_key] or force_push):
             try:
                 storage.push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
                                        sanitized_proj_name, proj_backup_path,
