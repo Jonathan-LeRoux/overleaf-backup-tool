@@ -94,7 +94,7 @@ class GitStorage():
                                 myrepo.create_remote(remote_name,
                                                      urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
                             else:
-                                myrepo.set_url(urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
+                                myrepo.remotes[remote_name].set_url(urljoin(remote_api_uri, '/'.join([remote_path, repo_name])))
 
                     # push
                     myrepo.remotes[remote_name].push()
