@@ -163,6 +163,13 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                              .format(i + 1, len(projects_info_list), sanitized_proj_name, proj_git_url,
                                      old_sanitized_proj_name))
                 os.rename(old_proj_backup_path, proj_backup_path)
+            else:
+                # There should really be a folder, so if there is none, let's assume we need to backup
+                projects_old_id_to_info[proj["id"]]["backup_up_to_date"] = False
+                logging.info("{0}/{1} Couldn't find previous local backup folder {2} for project {3}, "
+                             "redownloading to folder {4}..."
+                             .format(i + 1, len(projects_info_list), old_proj_backup_path, sanitized_proj_name,
+                                     proj_backup_path))
         else:
             old_sanitized_proj_name = None
 

@@ -74,6 +74,7 @@ class GitStorage():
                                     'repo_name': '/'.join([remote_path, repo_name]),
                                     'repo_type': 'git',
                                     'description': 'Backup for Overleaf repo {}'.format(repo_name),
+                                    'copy_permissions': True
                                 }
                                 result_dict = call_rhodecode(remote_api_uri, auth_token, 'create_repo', rc_args, verbose)
                             elif old_repo_name is not None:
