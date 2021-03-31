@@ -2,6 +2,7 @@
 import logging
 import sys
 
+
 def is_debug():
     """
     Checks if the project is debugged in an IDE
@@ -9,7 +10,6 @@ def is_debug():
     """
     gettrace = getattr(sys, 'gettrace', None)
 
-    debug = False
     if gettrace is None:
         debug = False
     elif gettrace():
@@ -18,6 +18,7 @@ def is_debug():
         debug = False
 
     return debug
+
 
 def enable_http_client_debug():
     """

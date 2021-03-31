@@ -4,14 +4,14 @@ import pickle
 import re
 
 from clients.OverleafClient import OverleafClient
-from storage.GitStorage import GitStorage
+from storage.GitStorage import create_or_update_local_backup, push_to_remote
 from utils.debug import enable_http_client_debug, is_debug
 
 import os
-import sys
 import logging
 
 MAX_FILENAME_LENGTH = 40
+
 
 # From https://github.com/django/django/blob/main/django/utils/text.py
 def get_valid_filename(s):
@@ -26,10 +26,12 @@ def get_valid_filename(s):
     s = str(s).strip().replace(' ', '_')
     return re.sub(r'(?u)[^-\w.]', '', s)
 
+
 def limit_folder_name_length(folder_name, max_length=40):
     if len(folder_name) > max_length:
         folder_name = folder_name[:max_length]
     return folder_name
+
 
 def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
     proj_name = proj["name"]
@@ -41,15 +43,15 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
         if "backup_up_to_date" in p and p["sanitized_name"] == candidate_name]\
             or [p for p in projects_old_id_to_info.values()
                 if p["id"] != proj["id"] and p["sanitized_name"] == candidate_name]:
-            if len(candidate_name) > MAX_FILENAME_LENGTH - 4:
-                candidate_name = candidate_name[:MAX_FILENAME_LENGTH-4] + proj["id"][-4:]
-            else:
-                candidate_name = candidate_name + proj["id"][-4:]
+        if len(candidate_name) > MAX_FILENAME_LENGTH - 4:
+            candidate_name = candidate_name[:MAX_FILENAME_LENGTH-4] + proj["id"][-4:]
+        else:
+            candidate_name = candidate_name + proj["id"][-4:]
     if [p for p in projects_info_list
         if "backup_up_to_date" in p and p["sanitized_name"] == candidate_name] \
             or [p for p in projects_old_id_to_info.values()
                 if p["id"] != proj["id"] and p["sanitized_name"] == candidate_name]:
-            raise RuntimeError("Project name {} cannot be sanitized without clashing".format(proj_name))
+        raise RuntimeError("Project name {} cannot be sanitized without clashing".format(proj_name))
     return candidate_name
 
 
@@ -138,7 +140,6 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             projects_old_id_to_info[item["id"]] = item
 
     # backup projects
-    storage = GitStorage()
     logging.info("Backing up projects..")
     for i, proj in enumerate(projects_info_list):
         proj["url_git"] = "https://git.overleaf.com/%s" % proj["id"]
@@ -197,22 +198,22 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                          .format(i+1, len(projects_info_list), sanitized_proj_name, proj_git_url, proj_backup_path))
 
             try:
-                storage.create_or_update(proj_git_url, proj_backup_path)
+                create_or_update_local_backup(proj_git_url, proj_backup_path)
                 logging.info("Backup successful!")
                 proj["backup_up_to_date"] = True
                 proj[pushed_to_remote_key] = False
-            except Exception as ex:
-                logging.exception("Something went wrong during Overleaf pull!")
+            except RuntimeError:
+                logging.exception("Something went wrong during Overleaf pull, moving on!")
 
         if remote_path and proj["backup_up_to_date"] and (not proj[pushed_to_remote_key] or force_push):
             try:
-                storage.push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
-                                       sanitized_proj_name, proj_backup_path,
-                                       old_repo_name = old_sanitized_proj_name, verbose= verbose)
+                push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
+                               sanitized_proj_name, proj_backup_path,
+                               old_repo_name=old_sanitized_proj_name, verbose=verbose)
                 logging.info("Push successful!")
                 proj[pushed_to_remote_key] = True
-            except Exception as ex:
-                logging.exception("Something went wrong during push to other remote!")
+            except (RuntimeError, OSError):
+                logging.exception("Something went wrong during push to other remote, moving on!")
 
     logging.info("Successfully backed up {} projects out of {}.".format(
         len([proj for proj in projects_info_list if proj["backup_up_to_date"]]),
@@ -223,7 +224,6 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             len(projects_info_list), remote_name))
     json.dump(projects_info_list, open(projects_json_file, "w"))
     logging.info("Info for {0} projects saved to {1}!".format(len(projects_info_list), projects_json_file))
-
 
 
 if __name__ == "__main__":
