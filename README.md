@@ -66,6 +66,7 @@ my_backup_dir/
    │   ├── acl_natbib.bst
    │   ├── main.tex
    ├── projects.json
+   ├── projects.csv
 ```
 
 projects.json contains the metadata about the projects in Overleaf.
@@ -73,6 +74,15 @@ Successfully backed up projects will not be downloaded again if they are not cha
 
 ## Setting preferences for each repo
 projects.csv allows the user to set preferences for each repo, via the last 3 columns of each row:
-- perform local backup or not (1 to backup, 0 to skip)
-- choose non-default location for local backup (replace empty string with non-default backup path as needed)
-- perform remote backup or not (1 to backup, 0 to skip)
+- perform local backup or not: 1 to backup, 0 to skip; 0 will skip both local and remote
+- choose non-default location for local backup: replace empty string with non-default backup path as needed. 
+The specified backup folder needs to be either empty, non-existent, or a folder already
+ containing the corresponding Overleaf git repo
+- perform remote backup or not (1 to backup, 0 to skip; needs local backup to be set to 1, 
+as local backup is needed for push to remote)
+
+```csv
+a1c1e1g1i1k1m1o1q1s1u1w1,My_Project_a,1,,1
+a2c2e2g2i2k2m2o2q2s2u2w2,My_Project_b,1,~/articles/GreatConf/2021/Paper1/,1
+a3c3e3g3i3k3m3o3q3s3u3w3,My_Project_c,1,,1
+```

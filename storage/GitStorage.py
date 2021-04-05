@@ -10,6 +10,14 @@ from urllib.parse import urljoin
 RETRY = 3
 
 
+def is_git_repo(path):
+    try:
+        _ = git.Repo(path).git_dir
+        return True
+    except git.exc.InvalidGitRepositoryError:
+        return False
+
+
 def call_rhodecode(base_uri, auth_token, method, args, verbose):
     headers = {'content-type': 'application/json'}
     url = base_uri + '_admin/api'
@@ -31,23 +39,43 @@ def call_rhodecode(base_uri, auth_token, method, args, verbose):
 
 
 def create_or_update_local_backup(git_url, repo_dir):
-    for i in range(1, RETRY + 1):
-        try:
-            if os.path.isdir(repo_dir):
-                # pull
-                g = git.cmd.Git(repo_dir)
-                g.pull()
+    if not os.path.isdir(repo_dir):
+        # Create folder with parents
+        os.makedirs(repo_dir)
+    if is_git_repo(repo_dir) or not os.listdir(repo_dir):
+        # Folder is either already a git repo (then pull) or empty (then clone)
+        for i in range(1, RETRY + 1):
+            try:
+                if is_git_repo(repo_dir):
+                    # pull
+                    myrepo = Repo(repo_dir)
+                    origin_url = myrepo.remotes['origin'].url
+                    if origin_url == git_url:
+                        myrepo.remotes['origin'].pull()
+                    else:
+                        logging.exception("Folder {0} is a git repo but does not correspond to this Overleaf project."
+                                          "Origin is {1} instead of {2}.".format(repo_dir, origin_url, git_url))
+                        raise RuntimeError
+                elif not os.listdir(repo_dir):
+                    # existing but empty folder: clone
+                    Repo.clone_from(git_url, repo_dir)
+            except git.GitCommandError as ex:
+                logging.info("error:{0}: retry:{1}/{2}".format(ex, i, RETRY))
+                time.sleep(2)
+                logging.info("retrying")
+            except RuntimeError:
+                # Get out of the retry loop
+                break
             else:
-                # clone
-                Repo.clone_from(git_url, repo_dir)
-        except git.GitCommandError as ex:
-            logging.info("error:{0}: retry:{1}/{2}".format(ex, i, RETRY))
-            time.sleep(2)
-            logging.info("retrying")
+                return True
         else:
-            return True
+            logging.exception("Max retry count reached without success")
+        # We should only reach this if max retry count was reached without success or the git repo did not match
+        raise RuntimeError
     else:
-        logging.exception("max retry count reached without success")
+        # Existing non empty folder that is not already a git repo: we can't do anything
+        logging.exception("Specified folder {0} is not empty and not a git repo, "
+                          "we cannot clone into it".format(repo_dir))
         raise RuntimeError
 
 

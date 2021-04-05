@@ -185,7 +185,7 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                 if csv_proj_backup_path != old_proj_backup_path:
                     # user specified path is different from previous backup path
                     if not os.path.isdir(csv_proj_backup_path) and os.path.isdir(old_proj_backup_path):
-                        # if user specified path does not exist and old backup does exist, we try moving the old backup.
+                        # if user specified folder does not exist, we try moving the old backup.
                         # we use os.renames here to create intermediate folders if needed...
                         logging.info("{0}/{1} Moving old backup to new user specified path..."
                                      .format(i + 1, len(projects_info_list)))
@@ -209,6 +209,10 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
         proj[pushed_to_remote_key] = False
 
         if not user_enable_backup:
+            if user_enable_remote:
+                logging.info("{0}/{1} User asked to skip local backup but to push to remote for project {2}."
+                             "These settings are incompatible, as local backup is needed for remote push."
+                             .format(i + 1, len(projects_info_list), sanitized_proj_name))
             # User does not want local backup for this project, skip everything else
             continue
 
