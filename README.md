@@ -8,6 +8,11 @@ to write it on the command line (using Click).
 - Replaced project ID with a sanitized and shortened version of the project name 
 as folder name, handling clashes between identical shortened version by adding 
 last 4 characters of project ID.
+- Creates CSV file with list of repos, letting the user specify for each repo 
+whether to perform local backup, a non-default location for the local backup,
+  and whether to perform remote backup.
+- Added "CSV only" mode that only reads information from Overleaf and creates 
+CSV file, so that user can make tune behavior for each repo prior to first actual backup.
 - Optionally push backed up repo to remote(s) on a Rhodecode server, 
 creating the remote repo if it doesn't exist; 
   - requires creating an API auth_token on Rhodecode 

@@ -149,9 +149,8 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             projects_info_list_csv = list(csv.DictReader(csv_file))
         for item in projects_info_list_csv:
             projects_csv_id_to_info[item["id"]] = item
-    else: # if no .csv, just copy the info from json
+    else:  # if no .csv, just copy the info from json
         projects_csv_id_to_info = projects_old_id_to_info
-
 
     # backup projects
     logging.info("Backing up projects..")
@@ -163,32 +162,55 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
         # making sure there is no clash with existing shortened names
         sanitized_proj_name = sanitize_name(proj, projects_info_list, projects_old_id_to_info)
         proj_backup_path = os.path.join(backup_git_dir, sanitized_proj_name)
+        proj["sanitized_name"] = sanitized_proj_name
+        proj["backup_path"] = proj_backup_path  # this is the default, may be overwritten later
 
-        # Let's figure out if the user specified a non-default path; if so, we stick with it
+        # Let's see if the user specified a backup path; if so, we stick with it
         user_specified_backup_path = False
-        if proj["id"] in projects_old_id_to_info:
-            old_sanitized_proj_name = projects_old_id_to_info[proj["id"]]["sanitized_name"]
-            old_backup_git_dir = projects_old_id_to_info[proj["id"]]["backup_git_dir"]
-            default_old_proj_backup_path = os.path.join(old_backup_git_dir, old_sanitized_proj_name)
-            csv_proj_backup_path = projects_csv_id_to_info[proj["id"]]["backup_path"].strip()
+        user_enable_backup = 1
+        user_enable_remote = 1
+        proj["user_backup_path"] = ''
+        if proj["id"] in projects_csv_id_to_info:
+            user_enable_backup = int(projects_csv_id_to_info[proj["id"]]["enable_backup"])
+            user_enable_remote = int(projects_csv_id_to_info[proj["id"]]["enable_remote"])
+            csv_proj_backup_path = projects_csv_id_to_info[proj["id"]]["user_backup_path"]
             old_proj_backup_path = projects_old_id_to_info[proj["id"]]["backup_path"]
-            if csv_proj_backup_path != default_old_proj_backup_path:
+            if csv_proj_backup_path.strip():
                 # User specified path other than default
                 user_specified_backup_path = True
                 proj_backup_path = csv_proj_backup_path
+                proj["user_backup_path"] = proj_backup_path
                 logging.info("{0}/{1} User specified path {2} for project {3} other than default..."
                              .format(i + 1, len(projects_info_list), csv_proj_backup_path, sanitized_proj_name))
                 if csv_proj_backup_path != old_proj_backup_path:
-                    # user specified path is different from previous backup path, force backup
-                    projects_old_id_to_info[proj["id"]]["backup_up_to_date"] = False
-                    logging.info("{0}/{1} Specified path different from previous path, forcing backup..."
-                                 .format(i + 1, len(projects_info_list)))
-                    logging.info("{0}/{1} Please consider deleting {2}..."
-                                 .format(i + 1, len(projects_info_list), old_proj_backup_path))
+                    # user specified path is different from previous backup path
+                    if not os.path.isdir(csv_proj_backup_path) and os.path.isdir(old_proj_backup_path):
+                        # if user specified path does not exist and old backup does exist, we try moving the old backup.
+                        # we use os.renames here to create intermediate folders if needed...
+                        logging.info("{0}/{1} Moving old backup to new user specified path..."
+                                     .format(i + 1, len(projects_info_list)))
 
-        proj["backup_git_dir"] = backup_git_dir
-        proj["sanitized_name"] = sanitized_proj_name
-        proj["backup_path"] = proj_backup_path
+                        os.renames(old_proj_backup_path, csv_proj_backup_path)
+                    else:
+                        # user specified path exists, unsafe to overwrite with old backup, force git clone or pull
+                        projects_old_id_to_info[proj["id"]]["backup_up_to_date"] = False
+                        logging.info("{0}/{1} Specified existing path different from previous path, forcing backup..."
+                                     .format(i + 1, len(projects_info_list)))
+                        if os.path.isdir(old_proj_backup_path):
+                            logging.info("{0}/{1} Please consider deleting {2}..."
+                                         .format(i + 1, len(projects_info_list), old_proj_backup_path))
+                else:
+                    # user specified path was already used before, let's update the project info
+                    proj["backup_path"] = proj_backup_path
+
+        proj["enable_backup"] = user_enable_backup
+        proj["enable_remote"] = user_enable_remote
+        proj["backup_up_to_date"] = False
+        proj[pushed_to_remote_key] = False
+
+        if not user_enable_backup:
+            # User does not want local backup for this project, skip everything else
+            continue
 
         # Handle a potential project name change in Overleaf
         if proj["id"] in projects_old_id_to_info \
@@ -226,9 +248,6 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             else:
                 proj[pushed_to_remote_key] = projects_old_id_to_info[proj["id"]][pushed_to_remote_key]
             backup = False
-        else:
-            proj["backup_up_to_date"] = False
-            proj[pushed_to_remote_key] = False
 
         if not csv_only:
             if not backup:
@@ -243,10 +262,13 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                     logging.info("Backup successful!")
                     proj["backup_up_to_date"] = True
                     proj[pushed_to_remote_key] = False
+                    # in case backup path was not default, we update it here now that backup did succeed
+                    proj["backup_path"] = proj_backup_path
                 except RuntimeError:
                     logging.exception("Something went wrong during Overleaf pull, moving on!")
 
-            if remote_path and proj["backup_up_to_date"] and (not proj[pushed_to_remote_key] or force_push):
+            if remote_path and user_enable_remote \
+                    and proj["backup_up_to_date"] and (not proj[pushed_to_remote_key] or force_push):
                 try:
                     push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
                                    sanitized_proj_name, proj_backup_path,
@@ -268,15 +290,12 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
     logging.info("Info for {0} projects saved to {1}!".format(len(projects_info_list), projects_json_file))
 
     with open(projects_csv_file, mode='w', newline='', encoding='utf-8') as csv_file:
-        fieldnames = ["id","sanitized_name","backup_path","backup_git_dir"]
+        fieldnames = ["id", "sanitized_name", "enable_backup", "user_backup_path", "enable_remote"]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         for proj in sorted(projects_info_list, key=lambda k: k['sanitized_name']):
             proj['sanitized_name'] = proj['sanitized_name'].ljust(MAX_FILENAME_LENGTH)
-            proj['backup_path'] = proj['backup_path'].ljust(MAX_FILENAME_LENGTH)
-            proj['backup_git_dir'] = backup_git_dir
-            writer.writerow({k: proj.get(k,"") for k in fieldnames})
-
+            writer.writerow({k: proj.get(k, "") for k in fieldnames})
 
 
 if __name__ == "__main__":
