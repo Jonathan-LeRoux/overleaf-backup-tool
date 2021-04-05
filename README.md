@@ -36,7 +36,8 @@ pip install -r requirements.txt
 
 ## Usage
 ```bash
-python overleaf_backup.py --backup-dir my_backup_dir --include-archived
+# First run to create CSV file that allows tweaking preferences for each repo
+python overleaf_backup.py --backup-dir my_backup_dir --include-archived --csv-only
 # The code will try to push to a remote repo if a non-empty string is passed after --remote_path:
 python overleaf_backup.py --backup-dir my_backup_dir --include-archived --remote-api-uri remote_api_uri --remote-path path/to/folder/on/remote/server --auth-token your_auth_token --remote-type rc --remote-name rc --cookie-path .olauth --verbose
 ```
@@ -49,7 +50,7 @@ The first time, you will be prompted for username and password, but
 if a cookie path is provided, the cookie will be saved and after login 
 has been successful once, the saved cookie information will be used instead.
 
-You will find the cloned projects folders in my_backup_dir/git_backup/:
+By default, you will find the cloned projects folders in my_backup_dir/git_backup/:
 
 ```text
 my_backup_dir/
@@ -69,3 +70,9 @@ my_backup_dir/
 
 projects.json contains the metadata about the projects in Overleaf.
 Successfully backed up projects will not be downloaded again if they are not changed in Overleaf.
+
+## Setting preferences for each repo
+projects.csv allows the user to set preferences for each repo, via the last 3 columns of each row:
+- perform local backup or not (1 to backup, 0 to skip)
+- choose non-default location for local backup (replace empty string with non-default backup path as needed)
+- perform remote backup or not (1 to backup, 0 to skip)
