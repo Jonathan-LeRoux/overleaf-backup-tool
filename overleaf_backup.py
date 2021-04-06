@@ -186,9 +186,10 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                 proj["user_backup_path"] = proj_backup_path
                 logging.info("{0}/{1} User specified path {2} for project {3} other than default..."
                              .format(i + 1, len(projects_info_list), csv_proj_backup_path, sanitized_proj_name))
-                if csv_proj_backup_path != old_proj_backup_path:
+                if not csv_only and csv_proj_backup_path != old_proj_backup_path:
                     # user specified path is different from previous backup path
-                    if move_backup and not os.path.isdir(csv_proj_backup_path) and os.path.isdir(old_proj_backup_path):
+                    if move_backup and not os.path.isdir(csv_proj_backup_path) \
+                            and os.path.isdir(old_proj_backup_path):
                         # if user specified folder does not exist, we try moving the old backup.
                         # we use os.renames here to create intermediate folders if needed...
                         logging.info("{0}/{1} Moving old backup to new user specified path..."
@@ -204,8 +205,9 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                             logging.info("{0}/{1} Please consider deleting {2}..."
                                          .format(i + 1, len(projects_info_list), old_proj_backup_path))
                 else:
-                    # user specified path was already used before, let's update the project info
-                    proj["backup_path"] = proj_backup_path
+                    # Either we are in csv-only mode, or the user-specified path was already used before.
+                    # Either way, the current backup path should stay the same as in the json file.
+                    proj["backup_path"] = old_proj_backup_path
             elif "user_backup_path" in projects_old_id_to_info[proj["id"]] \
                     and projects_old_id_to_info[proj["id"]]["user_backup_path"] != csv_proj_backup_path:
                 # User stopped specifying a backup path
@@ -215,9 +217,6 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                 if os.path.isdir(old_proj_backup_path):
                     logging.info("{0}/{1} Please consider deleting {2}..."
                                  .format(i + 1, len(projects_info_list), old_proj_backup_path))
-
-        if sanitized_proj_name == 'ASRU2019_Memory_Based_Speaker_Adaptation':
-            logging.info('yo')
 
         proj["enable_backup"] = user_enable_backup
         proj["enable_remote"] = user_enable_remote
@@ -241,8 +240,8 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             # only change local folder name if not specified by user
             if not user_specified_backup_path:
                 if os.path.isdir(old_proj_backup_path):
-                    logging.info("{0}/{1} Project {2} with url {3} has changed name from {4} since last backup, "
-                                 "renaming local folder..."
+                    logging.info("{0}/{1} Project {2} has changed name from {4} since last backup, "
+                                 "renaming local folder... (Overleaf url: {3})"
                                  .format(i + 1, len(projects_info_list), sanitized_proj_name, proj_git_url,
                                          old_sanitized_proj_name))
                     os.rename(old_proj_backup_path, proj_backup_path)
@@ -271,10 +270,10 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
 
         if not csv_only:
             if not backup:
-                logging.info("{0}/{1} Project {2} with url {3} unchanged since last backup! Skip..."
+                logging.info("{0}/{1} Project {2} unchanged since last backup! Skip... (Overleaf url: {3})"
                              .format(i + 1, len(projects_info_list), sanitized_proj_name, proj_git_url))
             else:
-                logging.info("{0}/{1} Backing up project {2} with url {3} to {4}"
+                logging.info("{0}/{1} Backing up project {2} to {4}  (Overleaf url: {3})"
                              .format(i+1, len(projects_info_list), sanitized_proj_name, proj_git_url, proj_backup_path))
 
                 try:

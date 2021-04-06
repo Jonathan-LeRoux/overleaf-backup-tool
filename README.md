@@ -12,7 +12,7 @@ last 4 characters of project ID.
 whether to perform local backup, a non-default location for the local backup,
   and whether to perform remote backup.
 - Added "CSV only" mode that only reads information from Overleaf and creates 
-CSV file, so that user can make tune behavior for each repo prior to first actual backup.
+CSV file, so that user can tune behavior for each repo prior to first actual backup.
 - Optionally push backed up repo to remote(s) on a Rhodecode server, 
 creating the remote repo if it doesn't exist; 
   - requires creating an API auth_token on Rhodecode 
@@ -55,7 +55,9 @@ By default, you will find the cloned projects folders in my_backup_dir/git_backu
 ```text
 my_backup_dir/
 └── git_backup
-   ├── yourproject1name
+   ├── projects.csv
+   ├── projects.json
+   ├── yourproject1name
    │   ├── acl2018.bib
    │   ├── acl2018.sty
    │   ├── acl_natbib.bst
@@ -65,19 +67,25 @@ my_backup_dir/
    │   ├── acl2018.sty
    │   ├── acl_natbib.bst
    │   ├── main.tex
-   ├── projects.json
-   ├── projects.csv
 ```
 
 projects.json contains the metadata about the projects in Overleaf.
+
+projects.csv contains user settings on whether to perform local and/or remote backup, 
+and which location to use for local backup.
+
 Successfully backed up projects will not be downloaded again if they are not changed in Overleaf.
+
+If the Overleaf project name changes and default backup location is used, backup folder will be renamed accordingly.
+If a user-specified location is used, it will remain as is.
 
 ## Setting preferences for each repo
 projects.csv allows the user to set preferences for each repo, via the last 3 columns of each row:
 - perform local backup or not: 1 to backup, 0 to skip; 0 will skip both local and remote
 - choose non-default location for local backup: replace empty string with non-default backup path as needed. 
 The specified backup folder needs to be either empty, non-existent, or a folder already
- containing the corresponding Overleaf git repo
+ containing the corresponding Overleaf git repo. 
+ *Full path needs to be specified, and the project name will NOT be added.*
 - perform remote backup or not (1 to backup, 0 to skip; needs local backup to be set to 1, 
 as local backup is needed for push to remote)
 
