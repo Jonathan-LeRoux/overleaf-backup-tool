@@ -57,24 +57,10 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
 
 
 @click.command()
-# @click.option('-u', '--username', required=False,
-#               prompt="Username (type anything if already logged in, delete cookie and start again if needed)",
-#               help="You Overleaf username. Will NOT be stored or used for anything else.")
-# @click.option('-p', '--password', hide_input=True, required=False,
-#               prompt="Password (type anything if already logged in, delete cookie and start again if needed)",
-#               help="You Overleaf password. Will NOT be stored or used for anything else.")
 @click.option('-c', '--cookie-path', default="", type=click.Path(exists=False),
               help="Relative path to save/load the persisted Overleaf cookie.")
 @click.option('-b', '--backup-dir', default="./", type=click.Path(exists=True),
               help="Path of folder in which to store git backups.")
-@click.option('--include-archived/--ignore-archived', 'include_archived', default=False,
-              help="Download archived projects as well (Default: No).")
-@click.option('--verbose/--non-verbose', 'verbose', default=False,
-              help="Verbose mode (Default: No).")
-@click.option('--csv-only/--no-csv-only', default=False,
-              help="Only generate CSV without backing up,  (Default: No).")
-@click.option('--force-push/--no-force-push', 'force_push', default=False,
-              help="Force push to remote (Default: No).")
 @click.option('-u', '--remote-api-uri', default="", type=str,
               help="Path to remote API if pushing git repos to another remote.")
 @click.option('-r', '--remote-path', default="", type=str,
@@ -85,8 +71,18 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
               help="Name (within git) of remote for pushing git repos to another remote.")
 @click.option('-t', '--remote-type', default="rc", type=click.Choice(['rc', 'github'], case_sensitive=False),
               help="Type other remote for pushing git repos (either 'rc' or 'github').")
+@click.option('--include-archived/--ignore-archived', 'include_archived', default=False,
+              help="Download archived projects as well (Default: No).")
+@click.option('--verbose/--non-verbose', 'verbose', default=False,
+              help="Verbose mode (Default: No).")
+@click.option('--csv-only/--no-csv-only', default=False,
+              help="Only generate CSV without backing up,  (Default: No).")
+@click.option('--force-push/--no-force-push', 'force_push', default=False,
+              help="Force push to remote (Default: No).")
+@click.option('--move-backups-when-possible/--never-move-backups', 'move_backup', default=True,
+              help="Move local backup to user-specified location if possible (Default: Yes).")
 def main(cookie_path, backup_dir, include_archived, remote_api_uri,
-         remote_path, remote_type, remote_name, auth_token, verbose, force_push, csv_only):
+         remote_path, remote_type, remote_name, auth_token, verbose, force_push, csv_only, move_backup):
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
 
@@ -151,6 +147,13 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             projects_csv_id_to_info[item["id"]] = item
     else:  # if no .csv, just copy the info from json
         projects_csv_id_to_info = projects_old_id_to_info
+        for id in projects_csv_id_to_info:
+            if "enable_backup" not in projects_csv_id_to_info[id]:
+                projects_csv_id_to_info[id]["enable_backup"] = '1'
+            if "enable_remote" not in projects_csv_id_to_info[id]:
+                projects_csv_id_to_info[id]["enable_remote"] = '1'
+            if "user_backup_path" not in projects_csv_id_to_info[id]:
+                projects_csv_id_to_info[id]["user_backup_path"] = ''
 
     # backup projects
     logging.info("Backing up projects..")
@@ -175,7 +178,8 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             user_enable_remote = int(projects_csv_id_to_info[proj["id"]]["enable_remote"])
             csv_proj_backup_path = projects_csv_id_to_info[proj["id"]]["user_backup_path"]
             old_proj_backup_path = projects_old_id_to_info[proj["id"]]["backup_path"]
-            if csv_proj_backup_path.strip():
+            csv_proj_backup_path = csv_proj_backup_path.strip()
+            if csv_proj_backup_path:
                 # User specified path other than default
                 user_specified_backup_path = True
                 proj_backup_path = csv_proj_backup_path
@@ -184,7 +188,7 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                              .format(i + 1, len(projects_info_list), csv_proj_backup_path, sanitized_proj_name))
                 if csv_proj_backup_path != old_proj_backup_path:
                     # user specified path is different from previous backup path
-                    if not os.path.isdir(csv_proj_backup_path) and os.path.isdir(old_proj_backup_path):
+                    if move_backup and not os.path.isdir(csv_proj_backup_path) and os.path.isdir(old_proj_backup_path):
                         # if user specified folder does not exist, we try moving the old backup.
                         # we use os.renames here to create intermediate folders if needed...
                         logging.info("{0}/{1} Moving old backup to new user specified path..."
@@ -194,14 +198,26 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                     else:
                         # user specified path exists, unsafe to overwrite with old backup, force git clone or pull
                         projects_old_id_to_info[proj["id"]]["backup_up_to_date"] = False
-                        logging.info("{0}/{1} Specified existing path different from previous path, forcing backup..."
-                                     .format(i + 1, len(projects_info_list)))
+                        logging.info("{0}/{1} Specified existing path different from previous path, "
+                                     "forcing backup...".format(i + 1, len(projects_info_list)))
                         if os.path.isdir(old_proj_backup_path):
                             logging.info("{0}/{1} Please consider deleting {2}..."
                                          .format(i + 1, len(projects_info_list), old_proj_backup_path))
                 else:
                     # user specified path was already used before, let's update the project info
                     proj["backup_path"] = proj_backup_path
+            elif "user_backup_path" in projects_old_id_to_info[proj["id"]] \
+                    and projects_old_id_to_info[proj["id"]]["user_backup_path"] != csv_proj_backup_path:
+                # User stopped specifying a backup path
+                projects_old_id_to_info[proj["id"]]["backup_up_to_date"] = False
+                logging.info("{0}/{1} User no longer specifying non-default path, going back to default, "
+                             "forcing backup...".format(i + 1, len(projects_info_list)))
+                if os.path.isdir(old_proj_backup_path):
+                    logging.info("{0}/{1} Please consider deleting {2}..."
+                                 .format(i + 1, len(projects_info_list), old_proj_backup_path))
+
+        if sanitized_proj_name == 'ASRU2019_Memory_Based_Speaker_Adaptation':
+            logging.info('yo')
 
         proj["enable_backup"] = user_enable_backup
         proj["enable_remote"] = user_enable_remote
