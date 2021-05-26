@@ -64,13 +64,19 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
 @click.option('-u', '--remote-api-uri', default="", type=str,
               help="Path to remote API if pushing git repos to another remote.")
 @click.option('-r', '--remote-path', default="", type=str,
-              help="Path (without base URI) to subfolder for pushing git repos to another remote.")
+              help="Rhodecode: Path (w/o base URI) to subfolder for pushing git repos to RC remote.\n"
+                   "Github: Prefix for names of repos pushed to Github.")
 @click.option('-a', '--auth-token', default="", type=str,
               help="Auth token for remote API access for pushing git repos.")
-@click.option('-n', '--remote-name', default="rc", type=str,
+@click.option('-g', '--github-username', default="", type=str,
+              help="Github username.")
+@click.option('-o', '--github-orgname', default="", type=str,
+              help="Name of Github organization under which to store repos "
+                   "(leave empty to use repos for the authenticated user).")
+@click.option('-n', '--remote-name', default="", type=str,
               help="Name (within git) of remote for pushing git repos to another remote.")
 @click.option('-t', '--remote-type', default="rc", type=click.Choice(['rc', 'github'], case_sensitive=False),
-              help="Type other remote for pushing git repos (either 'rc' or 'github').")
+              help="Type of other remote for pushing git repos (either 'rc' or 'github').")
 @click.option('--include-archived/--ignore-archived', 'include_archived', default=False,
               help="Download archived projects as well (Default: No).")
 @click.option('--verbose/--non-verbose', 'verbose', default=False,
@@ -81,8 +87,8 @@ def sanitize_name(proj, projects_info_list, projects_old_id_to_info):
               help="Force push to remote (Default: No).")
 @click.option('--move-backups-when-possible/--never-move-backups', 'move_backup', default=True,
               help="Move local backup to user-specified location if possible (Default: Yes).")
-def main(cookie_path, backup_dir, include_archived, remote_api_uri,
-         remote_path, remote_type, remote_name, auth_token, verbose, force_push, csv_only, move_backup):
+def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path, remote_type,
+         remote_name, auth_token, github_username, github_orgname, verbose, force_push, csv_only, move_backup):
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
 
@@ -96,10 +102,27 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
     if not backup_dir.endswith("/"):
         backup_dir = backup_dir + "/"
 
-    if remote_path and not remote_api_uri.endswith("/"):
-        remote_api_uri = remote_api_uri + "/"
-    pushed_to_remote_key = "pushed_to_remote_{}".format(remote_name)
+    if remote_type == 'github':
+        if not github_username:
+            logging.exception("A Github username needs to be specified when pushing to Github.")
+            return False
+        if not remote_api_uri:
+            remote_api_uri = 'https://api.github.com/'
+        elif not remote_api_uri.endswith("/"):
+            remote_api_uri = remote_api_uri + "/"
+        if not remote_path:
+            remote_path = 'overleaf-'
+        if not remote_name:
+            remote_name = 'github'
 
+    if remote_type == 'rc':
+        if not remote_api_uri.endswith("/"):
+            remote_api_uri = remote_api_uri + "/"
+        if not remote_name:
+            remote_name = 'rc'
+
+    pushed_to_remote_key = "pushed_to_remote_{}".format(remote_name)
+    
     backup_git_dir = os.path.join(backup_dir, backup_git_dir)
 
     if not os.path.isfile(cookie_path):
@@ -147,13 +170,13 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
             projects_csv_id_to_info[item["id"]] = item
     else:  # if no .csv, just copy the info from json
         projects_csv_id_to_info = projects_old_id_to_info
-        for id in projects_csv_id_to_info:
-            if "enable_backup" not in projects_csv_id_to_info[id]:
-                projects_csv_id_to_info[id]["enable_backup"] = '1'
-            if "enable_remote" not in projects_csv_id_to_info[id]:
-                projects_csv_id_to_info[id]["enable_remote"] = '1'
-            if "user_backup_path" not in projects_csv_id_to_info[id]:
-                projects_csv_id_to_info[id]["user_backup_path"] = ''
+        for proj_id in projects_csv_id_to_info:
+            if "enable_backup" not in projects_csv_id_to_info[proj_id]:
+                projects_csv_id_to_info[proj_id]["enable_backup"] = '1'
+            if "enable_remote" not in projects_csv_id_to_info[proj_id]:
+                projects_csv_id_to_info[proj_id]["enable_remote"] = '1'
+            if "user_backup_path" not in projects_csv_id_to_info[proj_id]:
+                projects_csv_id_to_info[proj_id]["user_backup_path"] = ''
 
     # backup projects
     logging.info("Backing up projects..")
@@ -262,10 +285,18 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                 and ("backup_up_to_date" in projects_old_id_to_info[proj["id"]]
                      and projects_old_id_to_info[proj["id"]]["backup_up_to_date"]):
             proj["backup_up_to_date"] = True
-            if old_sanitized_proj_name:
-                proj[pushed_to_remote_key] = False  # we need to force a push to change the repo name
-            else:
-                proj[pushed_to_remote_key] = projects_old_id_to_info[proj["id"]][pushed_to_remote_key]
+            if pushed_to_remote_key not in projects_old_id_to_info[proj["id"]]:  
+                # this is a new remote, we add it to old info for convenience as proj will inherit all old info
+                projects_old_id_to_info[proj["id"]][pushed_to_remote_key] = False
+            if old_sanitized_proj_name:  
+                # we need to force a push to change the repo name on all remotes (next time each remote is updated)
+                projects_old_id_to_info[proj["id"]].update({remote_key: False
+                                                            for remote_key in projects_old_id_to_info[proj["id"]]
+                                                            if remote_key.startswith('pushed_to_remote')})
+            # Now copy info for all remotes
+            proj.update({remote_key: value
+                         for (remote_key, value) in projects_old_id_to_info[proj["id"]].items()
+                         if remote_key.startswith('pushed_to_remote')})
             backup = False
 
         if not csv_only:
@@ -280,18 +311,23 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
                     create_or_update_local_backup(proj_git_url, proj_backup_path)
                     logging.info("Backup successful!")
                     proj["backup_up_to_date"] = True
-                    proj[pushed_to_remote_key] = False
+                    # All remotes will need to be updated
+                    proj.update({remote_key: False for remote_key in proj
+                                 if remote_key.startswith('pushed_to_remote')})
                     # in case backup path was not default, we update it here now that backup did succeed
                     proj["backup_path"] = proj_backup_path
                 except RuntimeError:
                     logging.exception("Something went wrong during Overleaf pull, moving on!")
 
-            if remote_path and user_enable_remote \
+            if remote_type and user_enable_remote \
                     and proj["backup_up_to_date"] and (not proj[pushed_to_remote_key] or force_push):
                 try:
                     push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
                                    sanitized_proj_name, proj_backup_path,
-                                   old_repo_name=old_sanitized_proj_name, verbose=verbose)
+                                   old_repo_name=old_sanitized_proj_name,
+                                   github_username=github_username,
+                                   github_orgname=github_orgname,
+                                   verbose=verbose)
                     logging.info("Push successful!")
                     proj[pushed_to_remote_key] = True
                 except (RuntimeError, OSError):
@@ -301,7 +337,7 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri,
         logging.info("Successfully backed up {} projects out of {}.".format(
             len([proj for proj in projects_info_list if proj["backup_up_to_date"]]),
             len(projects_info_list)))
-        if remote_path:
+        if remote_type:
             logging.info("Successfully pushed {} projects out of {} to remote {}.".format(
                 len([proj for proj in projects_info_list if proj[pushed_to_remote_key]]),
                 len(projects_info_list), remote_name))

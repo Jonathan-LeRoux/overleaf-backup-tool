@@ -69,7 +69,10 @@ class OverleafClient(object):
             login_cookies = r_signing_post.cookies
 
             # Enrich cookie with gke-route cookie from GET request above
-            login_cookies['gke-route'] = r_signing_get.cookies['gke-route']
+            if 'gke-route' in r_signing_get.cookies:
+                login_cookies['gke-route'] = r_signing_get.cookies['gke-route']
+            if 'GCLB' in r_signing_get.cookies:
+                login_cookies['GCLB'] = r_signing_get.cookies['GCLB']
         else:
             err_msg = "Status code {0} when signing in {1} with user [{2}] and pass [{3}]. " \
                       "Can not continue..".format(r_signing_post.status_code,
