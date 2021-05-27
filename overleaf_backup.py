@@ -122,7 +122,9 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
             remote_name = 'rc'
 
     pushed_to_remote_key = "pushed_to_remote_{}".format(remote_name)
-    
+    enable_remote_key = "enable_remote_{}".format(remote_name)
+    set_of_enable_remote_keys = {enable_remote_key}
+
     backup_git_dir = os.path.join(backup_dir, backup_git_dir)
 
     if not os.path.isfile(cookie_path):
@@ -168,15 +170,22 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
             projects_info_list_csv = list(csv.DictReader(csv_file))
         for item in projects_info_list_csv:
             projects_csv_id_to_info[item["id"]] = item
+        # add 'enable_remote_' key for all remotes tracked in .csv file to the set of keys that need to be tracked
+        if len(projects_info_list_csv) > 0:
+            set_of_enable_remote_keys.update([remote_key for remote_key in projects_info_list_csv[0]
+                                              if remote_key.startswith('enable_remote_')])
     else:  # if no .csv, just copy the info from json
         projects_csv_id_to_info = projects_old_id_to_info
         for proj_id in projects_csv_id_to_info:
             if "enable_backup" not in projects_csv_id_to_info[proj_id]:
                 projects_csv_id_to_info[proj_id]["enable_backup"] = '1'
-            if "enable_remote" not in projects_csv_id_to_info[proj_id]:
-                projects_csv_id_to_info[proj_id]["enable_remote"] = '1'
             if "user_backup_path" not in projects_csv_id_to_info[proj_id]:
                 projects_csv_id_to_info[proj_id]["user_backup_path"] = ''
+    # This one is outside the condition because for a new remote, the key won't exist in the .csv either
+    for proj_id in projects_csv_id_to_info:
+        if enable_remote_key not in projects_csv_id_to_info[proj_id]:
+            # One issue is that rc being default for remote_type, it will be enabled even if the user doesn't ask for it
+            projects_csv_id_to_info[proj_id][enable_remote_key] = '1'
 
     # backup projects
     logging.info("Backing up projects..")
@@ -194,11 +203,9 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
         # Let's see if the user specified a backup path; if so, we stick with it
         user_specified_backup_path = False
         user_enable_backup = 1
-        user_enable_remote = 1
         proj["user_backup_path"] = ''
         if proj["id"] in projects_csv_id_to_info:
             user_enable_backup = int(projects_csv_id_to_info[proj["id"]]["enable_backup"])
-            user_enable_remote = int(projects_csv_id_to_info[proj["id"]]["enable_remote"])
             csv_proj_backup_path = projects_csv_id_to_info[proj["id"]]["user_backup_path"]
             old_proj_backup_path = projects_old_id_to_info[proj["id"]]["backup_path"]
             csv_proj_backup_path = csv_proj_backup_path.strip()
@@ -242,12 +249,17 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
                                  .format(i + 1, len(projects_info_list), old_proj_backup_path))
 
         proj["enable_backup"] = user_enable_backup
-        proj["enable_remote"] = user_enable_remote
         proj["backup_up_to_date"] = False
+        # read info about whether remotes are enabled or not, defaulting to no backup
+        for remote_key in set_of_enable_remote_keys:
+            if proj["id"] in projects_csv_id_to_info and remote_key in projects_csv_id_to_info[proj["id"]]:
+                proj[remote_key] = int(projects_csv_id_to_info[proj["id"]][remote_key])
+            else:  # this only applies to projects that were added while another remote was considered
+                proj[remote_key] = 0
         proj[pushed_to_remote_key] = False
 
         if not user_enable_backup:
-            if user_enable_remote:
+            if proj[enable_remote_key]:
                 logging.info("{0}/{1} User asked to skip local backup but to push to remote for project {2}."
                              "These settings are incompatible, as local backup is needed for remote push."
                              .format(i + 1, len(projects_info_list), sanitized_proj_name))
@@ -319,7 +331,7 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
                 except RuntimeError:
                     logging.exception("Something went wrong during Overleaf pull, moving on!")
 
-            if remote_type and user_enable_remote \
+            if remote_type and proj[enable_remote_key] \
                     and proj["backup_up_to_date"] and (not proj[pushed_to_remote_key] or force_push):
                 try:
                     push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_token,
@@ -345,7 +357,7 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
     logging.info("Info for {0} projects saved to {1}!".format(len(projects_info_list), projects_json_file))
 
     with open(projects_csv_file, mode='w', newline='', encoding='utf-8') as csv_file:
-        fieldnames = ["id", "sanitized_name", "enable_backup", "user_backup_path", "enable_remote"]
+        fieldnames = ["id", "sanitized_name", "enable_backup", "user_backup_path"] + sorted(set_of_enable_remote_keys)
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         for proj in sorted(projects_info_list, key=lambda k: k['sanitized_name']):

@@ -57,13 +57,13 @@ def get_github_repo_html_url(remote_api_uri, remote_path, repo_name, github_user
     return repo_url
 
 
-def create_github_repo(base_uri, remote_path, repo_name, github_username, auth_token, github_orgname, verbose):
+def create_github_repo(remote_api_uri, remote_path, repo_name, github_username, auth_token, github_orgname, verbose):
     auth = (github_username, auth_token)
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if not github_orgname:
-        remote_api_uri = urljoin(base_uri, 'user/repos')
+        full_remote_api_uri = urljoin(remote_api_uri, 'user/repos')
     else:
-        remote_api_uri = urljoin(base_uri, 'org/{}/repos'.format(github_orgname))
+        full_remote_api_uri = urljoin(remote_api_uri, 'org/{}/repos'.format(github_orgname))
 
     payload = {
         'name': remote_path + repo_name,
@@ -73,17 +73,18 @@ def create_github_repo(base_uri, remote_path, repo_name, github_username, auth_t
     }
     if verbose:
         print('Calling Github with payload: ', payload)
-    r = requests.post(remote_api_uri, data=json.dumps(payload),
+    r = requests.post(full_remote_api_uri, data=json.dumps(payload),
                       auth=auth, headers=headers)
     if verbose:
         print('Github response: ' + r.text)
-    return r
+    return r.json()
 
 
-def rename_github_repo(base_uri, old_repo_name, remote_path, repo_name, github_username, auth_token, github_orgname, verbose):
+def rename_github_repo(remote_api_uri, old_repo_name, remote_path, repo_name, github_username, auth_token,
+                       github_orgname, verbose):
     auth = (github_username, auth_token)
     headers = {'Accept': 'application/vnd.github.v3+json'}
-    old_remote_repo_url = get_github_repo_api_url(base_uri, remote_path, old_repo_name,
+    old_remote_repo_url = get_github_repo_api_url(remote_api_uri, remote_path, old_repo_name,
                                                   github_username, github_orgname)
     payload = {
         'name': remote_path + repo_name,
@@ -95,7 +96,18 @@ def rename_github_repo(base_uri, old_repo_name, remote_path, repo_name, github_u
                       auth=auth, headers=headers)
     if verbose:
         print('Github response: ' + r.text)
-    return r
+    return r.json()
+
+
+def get_github_repo(remote_api_uri, remote_path, repo_name, github_username, auth_token, github_orgname, verbose):
+    auth = (github_username, auth_token)
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    remote_repo_url = get_github_repo_api_url(remote_api_uri, remote_path, repo_name,
+                                                  github_username, github_orgname)
+    r = requests.get(remote_repo_url, auth=auth, headers=headers)
+    if verbose:
+        print('Github response: ' + r.text)
+    return r.json()
 
 
 def create_or_update_local_backup(git_url, repo_dir):
@@ -145,11 +157,6 @@ def push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_t
         for i in range(1, RETRY + 1):
             try:
                 myrepo = Repo(repo_dir)
-                if remote_type == 'rc':
-                    remote_repo_url = urljoin(remote_api_uri, '/'.join([remote_path, repo_name]))
-                else: # Github, just concatenate the prefix specified by remote_path with repo_name
-                    remote_repo_url = get_github_repo_html_url(remote_api_uri, remote_path, repo_name,
-                                                               github_username, github_orgname)
                 remote_uri_and_path_changed = False
                 if remote_name in myrepo.remotes:
                     old_remote_url = myrepo.remotes[remote_name].url
@@ -188,24 +195,42 @@ def push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_t
                         # because a repo with the same name already existed (not super safe??)
                         if result_dict['error'] is None or 'unique_repo_name' in result_dict['error']:
                             repo_created = True
+                            remote_repo_url = urljoin(remote_api_uri, '/'.join([remote_path, repo_name]))
                             if result_dict['result'] is not None and 'msg' in result_dict['result']:
                                 logging.info("Remote responded: {}".format(result_dict['result']['msg']))
 
                     elif remote_type == 'github':
+                        result_dict = {}  # unnecessary, as result_dict should get defined below in all cases
+                        create_new_repo = False
                         if remote_name not in myrepo.remotes or remote_uri_and_path_changed:
-                            # create repo on the remote
-                            result = create_github_repo(remote_api_uri, remote_path, repo_name,
-                                                        github_username, auth_token, github_orgname, verbose)
-
+                            # Check whether repo already exists
+                            result_dict = get_github_repo(remote_api_uri, remote_path, repo_name,
+                                                     github_username, auth_token, github_orgname, verbose)
+                            if 'html_url' not in result_dict:
+                                # repo does not exist on remote, need to create it
+                                create_new_repo = True
                         elif old_repo_name is not None:
-                            # We need to rename the repo because the project name changed on Overleaf
-                            result = rename_github_repo(remote_api_uri, old_repo_name, remote_path, repo_name,
-                                                        github_username, auth_token, github_orgname, verbose)
+                            # Check whether old repo actually exists
+                            old_result_dict = get_github_repo(remote_api_uri, remote_path, old_repo_name,
+                                                          github_username, auth_token, github_orgname, verbose)
+                            if 'html_url' in old_result_dict:
+                                # We need to rename the repo because the project name changed on Overleaf
+                                result_dict = rename_github_repo(remote_api_uri, old_repo_name, remote_path, repo_name,
+                                                            github_username, auth_token, github_orgname, verbose)
+                            else:
+                                # old repo does not exist on remote, just create the new one
+                                create_new_repo = True
+                        if create_new_repo:
+                            result_dict = create_github_repo(remote_api_uri, remote_path, repo_name,
+                                                             github_username, auth_token, github_orgname, verbose)
+
                         # We assume the call is successful either if it did create the repo or gave an error
                         # because a repo with the same name already existed (not super safe??)
-                        if 'message' not in result or \
-                                ('errors' in result and 'name already exists' in result['errors'][0]['message']):
+                        if 'html_url' in result_dict:
                             repo_created = True
+                            remote_repo_url = result_dict['html_url']
+                        else:
+                            repo_created = False
                     # add remote to repo
                     if repo_created:
                         if remote_name not in myrepo.remotes:

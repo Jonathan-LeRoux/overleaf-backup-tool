@@ -66,6 +66,9 @@ python overleaf_backup.py --backup-dir my_backup_dir --csv-only
 You can now edit the CSV file (see [below](#setting-preferences-for-each-repo)) to choose
 whether to backup or not each project, and specify a non-default backup location.
 
+If `--remote-type github` or `--remote-type rc` is further added (defaults to `rc` if the option is not specified),
+the CSV file will contain a column to allow choosing whether to push each project to a Github or Rhodecode remote.
+
 ### Local backup
 To perform local backup only:
 ```bash
@@ -88,7 +91,7 @@ a Personal Authorization Token with "API call" permission (after `--auth-token`)
 python overleaf_backup.py -b my_backup_dir -u remote_api_uri -r path/to/folder/on/remote/server -a your_auth_token -t rc -n rc -c .olauth --verbose
 ```
 #### Github
-To push each repo (or a subset) to Github, specify the remote type as `github` (after `--remote-type`), 
+To push each repo (or a subset of selected ones) to Github, specify the remote type as `github` (after `--remote-type`), 
 a prefix for each repository name (defaults to "overleaf-" if not specified; after `--remote-path`),
 a name (within git) for the remote (e.g., `github`; Overleaf is `origin` by default),
 a Github username (after `--github-username`)
@@ -96,8 +99,8 @@ and a Personal Authorization Token with "repo" permission (after `--auth-token`)
 ```bash
 python overleaf_backup.py -b my_backup_dir -r overleaf- -a your_auth_token -t github -n github -c .olauth --verbose
 ```
-There is no hierarchy on Github, so `--remote_path` can be used to specify a prefix to each repository name 
-instead of a path. If not specified, the prefix defaults to "overleaf-".
+There is no hierarchy on Github, so `--remote_path` can be used instead to specify a prefix to each repository name 
+instead of a path. If not specified, the prefix defaults to `overleaf-`.
 
 By default, repos will be created for the authenticated user (i.e., under their account). 
 If a Github organization name is specified (after `--github-orgname`), then repos will be created in 
@@ -144,6 +147,9 @@ Options:
   -a, --auth-token TEXT           Auth token for remote API access for pushing
                                   git repos.
   -g, --github-username TEXT      Github username.
+  -o, --github-orgname TEXT       Name of Github organization under which to
+                                  store repos (leave empty to use repos for
+                                  the authenticated user).
   -n, --remote-name TEXT          Name (within git) of remote for pushing git
                                   repos to another remote.
   -t, --remote-type [rc|github]   Type of other remote for pushing git repos
@@ -202,10 +208,10 @@ or to different repo groups on the same Rhodecode remotes,
 by re-running the code with different remote parameters. 
 The code will **not** attempt to rename or remove repos created 
 with previous parameters, so you will need to clean up yourself
-if you're intention is to change the remote backup location for good.
+if your intention is to change the remote backup location for good.
 
 ## Setting preferences for each repo
-`projects.csv` allows the user to set preferences for each repo, via the last 3 columns of each row:
+`projects.csv` allows the user to set preferences for each repo, via the last columns of each row:
 - perform local backup or not (`enable_backup`): 1 to backup, 0 to skip; 0 will skip both local and remote backup.
 - choose non-default location for local backup (`user_backup_path`): replace empty string with non-default backup path as needed. 
 The specified backup folder needs to be either empty, non-existent, or a folder already
@@ -213,16 +219,17 @@ The specified backup folder needs to be either empty, non-existent, or a folder 
  *Full path needs to be specified, and the project name will NOT be added, to allow for user customization*, 
  i.e., `C:\Users\username\Documents\Articles\GreatConf\2020\Paper1\` on Windows or `~/Articles/GreatConf/2020/Paper1/`
  on Linux/Mac.
-- perform remote backup or not (`enable_remote`): 1 to backup, 0 to skip; needs local backup to be set to 1, 
+- perform remote backup or not (`enable_remote<remote_name>`, e.g., `enable_remote_github`, `enable_remote_rc`): 
+1 to backup, 0 to skip; needs local backup to be set to 1, 
 as local backup is needed for push to remote.
 
 Using a setting as the one below:
 ```csv
-id,sanitized_name,enable_backup,user_backup_path,enable_remote
+id,sanitized_name,enable_backup,user_backup_path,enable_remote_github
 a1c1e1g1i1k1m1o1q1s1u1w1,My_Project_a,0,,1
 a2c2e2g2i2k2m2o2q2s2u2w2,My_Project_b,1,~/articles/GreatConf/2021/Paper1/,1
 a3c3e3g3i3k3m3o3q3s3u3w3,My_Project_c,1,,0
 ```
 `My_Project_a` will be entirely skipped, `My_Project_b`
-will be backed up to non-default folder `~/articles/GreatConf/2021/Paper1/` and pushed to Rhodecode/Github,
+will be backed up to non-default folder `~/articles/GreatConf/2021/Paper1/` and pushed to Github,
 and `My_Project_c` will be backed up locally to the corresponding default location but not further pushed to a remote.
