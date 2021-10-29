@@ -22,8 +22,9 @@ that I will consider adding it.
 ### Main changes from original repo
 
 - Imported code from https://github.com/moritzgloeckl/overleaf-sync 
-to handle Overleaf v2 and securely input password without having 
-to write it on the command line (using Click). 
+to handle Overleaf v2.
+- Replaced username/password login with login based on cookie information to be
+ be retrieved after logging in with a browser. 
 - Replaced project ID with a sanitized and shortened version of the project name 
 as folder name, handling clashes between identical shortened version by adding 
 last 4 characters of project ID.
@@ -57,6 +58,16 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Logging in for the first time
+
+First log in to Overleaf with a browser and use Web Developer Tools (`Option/Ctrl+Shift+I` in Firefox and Chrome) 
+to retrieve the authentication cookie information.
+Look for the overleaf.com cookie under Storage>Cookies (under Application in Chrome).  
+The first time you use overleaf_backup, you will be ask for the values of `GCLB` and `overleaf_session2`.
+For `GCLB`, copy the value string. For `overleaf_session2`, copy the 'parsed value' (Firefox) or check 'Show URL decoded' and 
+copy the value (Chrome), in both cases starting with 's:...'
+
+
 ### Retrieve project information to allow non-default behavior (Optional)  
 Unless you are happy with the default behavior (backup all projects in subfolders of a unique folder),
 first run in "CSV only" mode to create a CSV file that allows tweaking preferences for each repo:
@@ -74,8 +85,8 @@ To perform local backup only:
 ```bash
 python overleaf_backup.py -b my_backup_dir --verbose
 ```
-### Password-less login
-To avoid having to input your Overleaf username/password every time, specify a path to save/load the authentication cookie 
+### Login without prompt for cookie information
+To avoid having to input your cookie information every time, specify a path to save/load the authentication cookie 
 whenever using the script:
 ```bash
 python overleaf_backup.py -b my_backup_dir --cookie-path .olauth --verbose
@@ -171,7 +182,12 @@ Options:
 The tool logs in to Overleaf and downloads 
 all non-archived projects (and optionally archived as well) via git.
 
-The first time, you will be prompted for username and password, but 
+The first time, you will be prompted for your cookie information. 
+Because Overleaf recently implemented Captcha at login, we can no longer simply use 
+username and password in the command line. 
+Some [other projects](https://github.com/moritzgloeckl/overleaf-sync/issues/28#) use PyQt to launch a mini
+browser, but we found it simpler to just have the user log into Overleaf with a browser and copy the cookie
+information. 
 if a cookie path is provided, the cookie will be saved and after login 
 has been successful once, the saved cookie information will be used instead.
 

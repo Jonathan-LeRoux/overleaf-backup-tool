@@ -128,12 +128,22 @@ def main(cookie_path, backup_dir, include_archived, remote_api_uri, remote_path,
     backup_git_dir = os.path.join(backup_dir, backup_git_dir)
 
     if not os.path.isfile(cookie_path):
-        username = click.prompt("Username")
-        password = click.prompt("Password", hide_input=True)
-        overleaf_client = OverleafClient()
-        store = overleaf_client.login_with_user_and_pass(username, password)
-        if store is None:
-            return False
+        logging.info("Please log in to overleaf in a browser, then use Web Developer Tools (Ctrl+Shift+I) "
+                     "to find the following cookie information.\n"
+                     "Look for the overleaf.com cookie under Storage>Cookies (under Application in Chrome).\n"
+                     "For GCLB, copy the value string.\n"
+                     "For overleaf_session2, copy the 'parsed value' (Firefox) or check 'Show URL decoded' and "
+                     "copy the value (Chrome), in both cases starting with 's:...'.")
+        GCLB = click.prompt("GCLB")
+        overleaf_session2 = click.prompt("overleaf_session2", hide_input=True)
+        # Remove GCLB key and double quotes if copied (e.g., in Firefox)
+        GCLB = GCLB.strip('GCLB').strip('"')
+        overleaf_session2 = 's:' + overleaf_session2.strip("s:").strip('"')  # Handle extra double quotes (e.g., in Firefox)
+        cookie = {'GCLB': GCLB,
+                  'overleaf_session2': overleaf_session2}
+        store = {'cookie': cookie, 'csrf': None}
+
+        overleaf_client = OverleafClient(store["cookie"], store["csrf"])
         if cookie_path:
             # Only store if a path is provided
             with open(cookie_path, 'wb+') as f:

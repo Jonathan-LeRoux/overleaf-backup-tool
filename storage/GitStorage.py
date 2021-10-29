@@ -157,85 +157,74 @@ def push_to_remote(remote_api_uri, remote_path, remote_name, remote_type, auth_t
         for i in range(1, RETRY + 1):
             try:
                 myrepo = Repo(repo_dir)
-                remote_uri_and_path_changed = False
-                if remote_name in myrepo.remotes:
-                    old_remote_url = myrepo.remotes[remote_name].url
+                # First check if new repo already exists for some reason (e.g., someone else created it)
+                repo_created = False
+                if remote_type == 'rc':
+                    rc_args = {'repoid': '/'.join([remote_path, repo_name])}
+                    result_dict = call_rhodecode(remote_api_uri, auth_token, 'get_repo', rc_args, verbose)
+                    if not result_dict['error']:
+                        repo_created = True
+                        remote_repo_url = result_dict['result']['url']
+                else:
+                    result_dict = get_github_repo(remote_api_uri, remote_path, repo_name,
+                                                  github_username, auth_token, github_orgname, verbose)
+                    if 'html_url' in result_dict:
+                        repo_created = True
+                        remote_repo_url = result_dict['html_url']
+
+                if not repo_created and remote_name in myrepo.remotes and old_repo_name is not None:
+                    # We already have a remote with that nickname but the project name changed on Overleaf,
+                    # so let's try to rename the original repo on the remote to the new name
                     if remote_type == 'rc':
-                        remote_uri_and_path = urljoin(remote_api_uri, remote_path)
-                        if not old_remote_url.startswith(remote_uri_and_path):
-                            remote_uri_and_path_changed = True
-                    else: # Github: not a very strict test, but I'm unsure the repo URL always starts with https://
-                        if not get_github_repo_html_url(remote_api_uri, remote_path, '',
-                                                        github_username, github_orgname) in old_remote_url:
-                            remote_uri_and_path_changed = True
-                if remote_name not in myrepo.remotes or old_repo_name is not None or remote_uri_and_path_changed:
-                    # We need to either create or rename the repo on the remote
-                    repo_created = False
-                    if remote_type == 'rc':
-                        result_dict = {'error': {}}  # unnecessary, as result_dict should get defined below in all cases
-                        if remote_name not in myrepo.remotes or remote_uri_and_path_changed:
-                            # create repo on the remote
-                            rc_args = {
-                                'repo_name': '/'.join([remote_path, repo_name]),
-                                'repo_type': 'git',
-                                'description': 'Backup for Overleaf repo {}'.format(repo_name),
-                                'copy_permissions': True
-                            }
-                            result_dict = call_rhodecode(remote_api_uri, auth_token, 'create_repo', rc_args, verbose)
-                        elif old_repo_name is not None:
-                            # We need to rename the repo because the project name changed on Overleaf
+                        rc_args = {'repoid': '/'.join([remote_path, old_repo_name])}
+                        old_result_dict = call_rhodecode(remote_api_uri, auth_token, 'get_repo', rc_args, verbose)
+                        if not old_result_dict['error']:  # The old repo exists, try to rename
                             rc_args = {
                                 'repoid': '/'.join([remote_path, old_repo_name]),
                                 'repo_name': '/'.join([remote_path, repo_name]),
                                 'description': 'Backup for Overleaf repo {}'.format(repo_name),
                             }
                             result_dict = call_rhodecode(remote_api_uri, auth_token, 'update_repo', rc_args, verbose)
-
-                        # We assume the call is successful either if it did create the repo or gave an error
-                        # because a repo with the same name already existed (not super safe??)
-                        if result_dict['error'] is None or 'unique_repo_name' in result_dict['error']:
-                            repo_created = True
-                            remote_repo_url = urljoin(remote_api_uri, '/'.join([remote_path, repo_name]))
-                            if result_dict['result'] is not None and 'msg' in result_dict['result']:
-                                logging.info("Remote responded: {}".format(result_dict['result']['msg']))
-
-                    elif remote_type == 'github':
-                        result_dict = {}  # unnecessary, as result_dict should get defined below in all cases
-                        create_new_repo = False
-                        if remote_name not in myrepo.remotes or remote_uri_and_path_changed:
-                            # Check whether repo already exists
-                            result_dict = get_github_repo(remote_api_uri, remote_path, repo_name,
-                                                     github_username, auth_token, github_orgname, verbose)
-                            if 'html_url' not in result_dict:
-                                # repo does not exist on remote, need to create it
-                                create_new_repo = True
-                        elif old_repo_name is not None:
-                            # Check whether old repo actually exists
-                            old_result_dict = get_github_repo(remote_api_uri, remote_path, old_repo_name,
+                            if not result_dict['error']:  # renaming successful, we are done
+                                repo_created = True
+                                remote_repo_url = remote_api_uri + rc_args['repo_name'] # result_dict['result']['url']
+                    else:
+                        old_result_dict = get_github_repo(remote_api_uri, remote_path, old_repo_name,
                                                           github_username, auth_token, github_orgname, verbose)
-                            if 'html_url' in old_result_dict:
-                                # We need to rename the repo because the project name changed on Overleaf
-                                result_dict = rename_github_repo(remote_api_uri, old_repo_name, remote_path, repo_name,
-                                                            github_username, auth_token, github_orgname, verbose)
-                            else:
-                                # old repo does not exist on remote, just create the new one
-                                create_new_repo = True
-                        if create_new_repo:
-                            result_dict = create_github_repo(remote_api_uri, remote_path, repo_name,
-                                                             github_username, auth_token, github_orgname, verbose)
+                        if 'html_url' in old_result_dict:  # The old repo exists, try to rename
+                            result_dict = rename_github_repo(remote_api_uri, old_repo_name, remote_path,
+                                                             repo_name,
+                                                             github_username, auth_token, github_orgname,
+                                                             verbose)
+                            if 'html_url' in result_dict:  # renaming successful, we are done
+                                repo_created = True
+                                remote_repo_url = result_dict['html_url']
 
-                        # We assume the call is successful either if it did create the repo or gave an error
-                        # because a repo with the same name already existed (not super safe??)
+                if not repo_created:  # repo didn't exist or we didn't succeed in renaming an old one, let's create it
+                    if remote_type == 'rc':
+                        rc_args = {
+                            'repo_name': '/'.join([remote_path, repo_name]),
+                            'repo_type': 'git',
+                            'description': 'Backup for Overleaf repo {}'.format(repo_name),
+                            'copy_permissions': True
+                        }
+                        result_dict = call_rhodecode(remote_api_uri, auth_token, 'create_repo', rc_args, verbose)
+                        if not result_dict['error']:  # renaming successful, we are done
+                            repo_created = True
+                            remote_repo_url = remote_api_uri + rc_args['repo_name'] # result_dict['result']['url']
+                    else:  # Github
+                        result_dict = create_github_repo(remote_api_uri, remote_path, repo_name,
+                                                         github_username, auth_token, github_orgname, verbose)
                         if 'html_url' in result_dict:
                             repo_created = True
                             remote_repo_url = result_dict['html_url']
-                        else:
-                            repo_created = False
-                    # add remote to repo
-                    if repo_created:
-                        if remote_name not in myrepo.remotes:
-                            myrepo.create_remote(remote_name, remote_repo_url)
-                        else:
+
+                # add remote to repo
+                if repo_created:
+                    if remote_name not in myrepo.remotes:
+                        myrepo.create_remote(remote_name, remote_repo_url)
+                    else:
+                        if myrepo.remotes[remote_name].url != remote_repo_url:
                             myrepo.remotes[remote_name].set_url(remote_repo_url)
 
                 # push
